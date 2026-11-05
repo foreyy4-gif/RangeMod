@@ -31,7 +31,7 @@ namespace RangeMod
 
         public static bool MovementSync = false;
 
-        public override string GetVersion() => "3.10.0";
+        public override string GetVersion() => "3.11.0";
 
         public RangeMod() : base("Range Mod")
         {
@@ -605,6 +605,7 @@ namespace RangeMod
             public Vector3 chain;
             public bool chainSet;
             public bool underHero;
+            public float lastSeen;
         }
 
         private static readonly List<SpellTrack> _tracked = new List<SpellTrack>();
@@ -637,6 +638,15 @@ namespace RangeMod
                 || n.Contains("Hit");
         }
 
+        private static bool AbilityName(string n)
+        {
+            return n.Contains("SD ") || n.Contains("Sharp") || n.Contains("Crystal") || n.Contains("Dash")
+                || n.Contains("Recharge") || n.Contains("Wing") || n.Contains("Cloak") || n.Contains("Charm")
+                || n.Contains("Thorn") || n.Contains("Soul") || n.Contains("Geo") || n.Contains("Wall")
+                || n.Contains("Map") || n.Contains("Inv") || n.Contains("Focus") || n.Contains("Blobs")
+                || n.Contains("Blurp") || n.Contains("Grub");
+        }
+
         internal static Func<float> MulForKind(int kind)
         {
             if (kind == KindFire) return () => RangeMod.FireballMul;
@@ -653,7 +663,7 @@ namespace RangeMod
             string nm = (n ?? "") + " " + (fsm ?? "");
             int k = StrongKind(nm);
             if (k >= 0) { kind = k; return MulForKind(k); }
-            if (spawn && GenericEffect(nm) && Time.time - _activeSpellTime < 2.5f && ActiveSpellKind != KindNone)
+            if (spawn && GenericEffect(nm) && !AbilityName(nm) && Time.time - _activeSpellTime < 2.5f && ActiveSpellKind != KindNone)
             {
                 kind = ActiveSpellKind;
                 return MulForKind(kind);
@@ -753,8 +763,12 @@ namespace RangeMod
         }
 
         private static Transform _lastHeroRoot;
+        private static Transform _spellsRoot;
+        private static Transform[] _spellsChildren;
+        private static readonly List<Transform> _scanBuf = new List<Transform>(128);
         private static bool _heroUpdateLogged;
-        private static bool _heroRestored = true;
+        private static Vector3 _heroBase = Vector3.one;
+        private static Vector3 _heroLastSet = Vector3.one;
         private static PlayMakerFSM _spellFsm;
         private static BoxCollider2D[] _diveCols;
         private static Vector2[] _diveBases;
@@ -780,8 +794,8 @@ namespace RangeMod
             }
 
             string st = (_spellFsm != null && _spellFsm.Fsm != null) ? (_spellFsm.Fsm.ActiveStateName ?? "") : "";
-            int castKind = st.Contains("Fire") ? KindFire
-                : (st.Contains("Quake") || st.Contains("Dive") || st.Contains("Land") || st.Contains("Slam")) ? KindQuake
+            int castKind = (st.Contains("Fireball") || st.Contains("Fire Ball") || st.Contains("Shade Soul") || st.Contains("Vengeful")) ? KindFire
+                : (st.StartsWith("Q") || st.Contains("Quake") || st.Contains("Dive")) ? KindQuake
                 : (st.Contains("Scream") || st.Contains("Roar") || st.Contains("Shriek") || st.Contains("Abyss") || st.Contains("Wraith")) ? KindScream
                 : KindNone;
             if (castKind != KindNone)
@@ -792,17 +806,28 @@ namespace RangeMod
                 _activeSpellTime = Time.time;
             }
 
-            Transform spells = null;
-            for (int si = 0; si < hero.transform.childCount; si++)
+            if (_spellsChildren == null || _spellsRoot == null || !_spellsRoot || _spellsRoot.parent != hero.transform)
             {
-                Transform c0 = hero.transform.GetChild(si);
-                if (c0.name == "Spells") { spells = c0; break; }
-            }
-            if (spells != null)
-            {
-                for (int si = 0; si < spells.childCount; si++)
+                _spellsRoot = null;
+                _spellsChildren = null;
+                for (int si = 0; si < hero.transform.childCount; si++)
                 {
-                    Transform c0 = spells.GetChild(si);
+                    Transform c0 = hero.transform.GetChild(si);
+                    if (c0.name == "Spells") { _spellsRoot = c0; break; }
+                }
+                if (_spellsRoot != null)
+                {
+                    _spellsChildren = new Transform[_spellsRoot.childCount];
+                    for (int si = 0; si < _spellsRoot.childCount; si++)
+                        _spellsChildren[si] = _spellsRoot.GetChild(si);
+                }
+            }
+            if (_spellsChildren != null)
+            {
+                for (int si = 0; si < _spellsChildren.Length; si++)
+                {
+                    Transform c0 = _spellsChildren[si];
+                    if (c0 == null) continue;
                     int k0 = c0.name.StartsWith("Q") ? KindQuake
                         : (c0.name.StartsWith("Scr") || c0.name.StartsWith("S1")) ? KindScream
                         : KindFire;
@@ -810,13 +835,16 @@ namespace RangeMod
                 }
             }
 
-            List<Transform> found = new List<Transform>();
-            CollectHeroEffects(hero.transform, found);
-            for (int i = 0; i < found.Count; i++)
+            if (Time.frameCount % 4 == 0)
             {
-                int kind;
-                Func<float> mv = SpellMul(found[i].name, "", false, out kind);
-                if (mv != null) TrackSpell(found[i], mv, kind);
+                _scanBuf.Clear();
+                CollectHeroEffects(hero.transform, _scanBuf);
+                for (int i = 0; i < _scanBuf.Count; i++)
+                {
+                    int kind;
+                    Func<float> mv = SpellMul(_scanBuf[i].name, "", false, out kind);
+                    if (mv != null) TrackSpell(_scanBuf[i], mv, kind);
+                }
             }
 
             bool diving = castKind == KindQuake;
@@ -884,7 +912,8 @@ namespace RangeMod
                 if (Math.Abs(cur.y) > 1e-5f && Math.Abs(lossy.y) > 1e-5f)
                     target.y = tr.baseScale.y * m * cur.y / lossy.y;
 
-                tr.t.localScale = target;
+                if (Math.Abs(target.x - cur.x) > 0.0001f || Math.Abs(target.y - cur.y) > 0.0001f)
+                    tr.t.localScale = target;
                 tr.lastSet = target;
 
                 if (!tr.chainSet)
@@ -892,6 +921,7 @@ namespace RangeMod
                     tr.chainSet = true;
                     tr.underHero = TryGetHeroChain(tr.t, out Vector3 ch);
                     tr.chain = ch;
+                    tr.lastSeen = Time.time;
                 }
                 if (tr.underHero)
                 {
@@ -904,7 +934,8 @@ namespace RangeMod
                     tp.x = (tr.chain.x + tr.basePos.x) * m / hm - tr.chain.x;
                     tp.y = (tr.chain.y + tr.basePos.y) * m / hm - tr.chain.y;
                     tp.z = (tr.chain.z + tr.basePos.z) * m / hm - tr.chain.z;
-                    tr.t.localPosition = tp;
+                    if (Math.Abs(tp.x - lp.x) > 0.0001f || Math.Abs(tp.y - lp.y) > 0.0001f)
+                        tr.t.localPosition = tp;
                     tr.lastSetPos = tp;
                 }
                 _tracked[i] = tr;
@@ -1009,30 +1040,16 @@ namespace RangeMod
                 }
                 UpdateArtSlashes(__instance);
                 UpdateHeroSpells(__instance);
-                EnforceTrackedSpells();
                 float m = RangeMod.HeroMul;
                 Transform t = __instance.transform;
 
-                if (m == 1f)
-                {
-                    if (!_heroRestored)
-                    {
-                        float sign0 = t.localScale.x < 0f ? -1f : 1f;
-                        t.localScale = new Vector3(sign0, 1f, 1f);
-                        _heroRestored = true;
-                    }
-                    return;
-                }
-                _heroRestored = false;
-
-                float sx = t.localScale.x;
-                float sign2 = sx < 0f ? -1f : 1f;
-                Vector3 target = new Vector3(sign2 * m, m, 1f);
-                if (Mathf.Abs(t.localScale.x - target.x) > 0.0001f ||
-                    Mathf.Abs(t.localScale.y - target.y) > 0.0001f)
-                {
-                    t.localScale = target;
-                }
+                Vector3 hcur = t.localScale;
+                if (Mathf.Abs(hcur.x - _heroLastSet.x) > 0.0001f || Mathf.Abs(hcur.y - _heroLastSet.y) > 0.0001f)
+                    _heroBase = hcur;
+                Vector3 htarget = new Vector3(_heroBase.x * m, _heroBase.y * m, _heroBase.z);
+                if (Mathf.Abs(hcur.x - htarget.x) > 0.0001f || Mathf.Abs(hcur.y - htarget.y) > 0.0001f)
+                    t.localScale = htarget;
+                _heroLastSet = t.localScale;
             }
             catch (Exception e)
             {
