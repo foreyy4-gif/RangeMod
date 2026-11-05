@@ -31,7 +31,7 @@ namespace RangeMod
 
         public static bool MovementSync = false;
 
-        public override string GetVersion() => "3.12.0";
+        public override string GetVersion() => "3.13.0";
 
         public RangeMod() : base("Range Mod")
         {
@@ -74,7 +74,7 @@ namespace RangeMod
 
                 int kind = Patches.SpawnKind(n);
                 Func<float> live = Patches.MulForKind(kind);
-                if (live == null) return obj;
+                if (live == null) { Patches.UntrackIfPresent(t); return obj; }
 
                 if (!Patches.IsUnderHero(t) && !Patches.NearHero(t))
                     return obj;
@@ -372,25 +372,10 @@ namespace RangeMod
 
     internal class ScaleDriver : MonoBehaviour
     {
-        private void OnEnable()
-        {
-            Camera.onPreRender += Enforce;
-        }
-
-        private void OnDisable()
-        {
-            Camera.onPreRender -= Enforce;
-        }
-
-        private static void Enforce(Camera _)
+        private void LateUpdate()
         {
             try { Patches.EnforceTrackedSpells(); }
             catch (Exception e) { RangeMod.Instance.LogWarn("Enforce failed: " + e); }
-        }
-
-        private void LateUpdate()
-        {
-            Enforce(null);
         }
     }
 
@@ -651,7 +636,8 @@ namespace RangeMod
             string nm = n ?? "";
             if (nm.EndsWith("(Clone)")) nm = nm.Substring(0, nm.Length - 7);
             if (nm == "Fireball" || nm == "Fireball2 Spiral" || nm == "Fireball2 Top") return KindFire;
-            if (nm == "Shadow Burst" || nm == "Shadow Burst Down" || nm == "Shadow Ring") return KindQuake;
+            if (nm == "Shadow Burst" || nm == "Shadow Burst Down" || nm == "Shadow Ring")
+                return _divingNow ? KindQuake : KindNone;
             if (nm == "Roar Wave Emitter Scream") return KindScream;
             return KindNone;
         }
@@ -682,6 +668,12 @@ namespace RangeMod
                 }
             }
             return false;
+        }
+
+        internal static void UntrackIfPresent(Transform t)
+        {
+            for (int i = _tracked.Count - 1; i >= 0; i--)
+                if (_tracked[i].t == t) _tracked.RemoveAt(i);
         }
 
         internal static void TrackSpell(Transform t, Func<float> mul, int kind)
@@ -733,8 +725,6 @@ namespace RangeMod
         private static Transform _spellsRoot;
         private static Transform[] _spellsChildren;
         private static bool _heroUpdateLogged;
-        private static Vector3 _heroBase = Vector3.one;
-        private static Vector3 _heroLastSet = Vector3.one;
         private static PlayMakerFSM _spellFsm;
         private static BoxCollider2D[] _diveCols;
         private static Vector2[] _diveBases;
@@ -823,8 +813,6 @@ namespace RangeMod
                     string cn = c0.name;
                     if (cn == "Roar Dust" || cn == "Roar Dust Lil")
                         TrackSpell(c0, () => RangeMod.ScreamMul, KindScream);
-                    else if (cn == "Shadow Burst" || cn == "Shadow Burst Down" || cn == "Shadow Ring")
-                        TrackSpell(c0, () => _divingNow ? RangeMod.QuakeMul : RangeMod.HeroMul, KindQuake);
                 }
             }
 
@@ -855,6 +843,64 @@ namespace RangeMod
                 for (int i = 0; i < _diveCols.Length; i++)
                     if (_diveCols[i] != null) _diveCols[i].size = _diveBases[i];
                 _diveScaled = false;
+            }
+        }
+
+        private struct HeroKid
+        {
+            public Transform t;
+            public Vector3 baseScale;
+            public Vector3 lastSet;
+            public Vector3 basePos;
+            public Vector3 lastSetPos;
+        }
+
+        private static readonly List<HeroKid> _heroKids = new List<HeroKid>();
+        private static Transform _kidsRoot;
+
+        internal static void UpdateHeroChildren(HeroController hero)
+        {
+            Transform h = hero.transform;
+            if (_kidsRoot != h || _heroKids.Count != h.childCount)
+            {
+                _kidsRoot = h;
+                _heroKids.Clear();
+                for (int i = 0; i < h.childCount; i++)
+                {
+                    Transform c = h.GetChild(i);
+                    _heroKids.Add(new HeroKid
+                    {
+                        t = c,
+                        baseScale = c.localScale,
+                        lastSet = c.localScale,
+                        basePos = c.localPosition,
+                        lastSetPos = c.localPosition
+                    });
+                }
+            }
+            float m = RangeMod.HeroMul;
+            for (int i = 0; i < _heroKids.Count; i++)
+            {
+                HeroKid k = _heroKids[i];
+                if (k.t == null) continue;
+
+                Vector3 cur = k.t.localScale;
+                if (Math.Abs(cur.x - k.lastSet.x) > 0.0001f || Math.Abs(cur.y - k.lastSet.y) > 0.0001f)
+                    k.baseScale = cur;
+                Vector3 tgt = new Vector3(k.baseScale.x * m, k.baseScale.y * m, k.baseScale.z);
+                if (Math.Abs(cur.x - tgt.x) > 0.0001f || Math.Abs(cur.y - tgt.y) > 0.0001f)
+                    k.t.localScale = tgt;
+                k.lastSet = k.t.localScale;
+
+                Vector3 lp = k.t.localPosition;
+                if (Math.Abs(lp.x - k.lastSetPos.x) > 0.0001f || Math.Abs(lp.y - k.lastSetPos.y) > 0.0001f)
+                    k.basePos = lp;
+                Vector3 tp = new Vector3(k.basePos.x * m, k.basePos.y * m, lp.z);
+                if (Math.Abs(lp.x - tp.x) > 0.0001f || Math.Abs(lp.y - tp.y) > 0.0001f)
+                    k.t.localPosition = tp;
+                k.lastSetPos = k.t.localPosition;
+
+                _heroKids[i] = k;
             }
         }
 
@@ -1021,16 +1067,7 @@ namespace RangeMod
                 }
                 UpdateArtSlashes(__instance);
                 UpdateHeroSpells(__instance);
-                float m = RangeMod.HeroMul;
-                Transform t = __instance.transform;
-
-                Vector3 hcur = t.localScale;
-                if (Mathf.Abs(hcur.x - _heroLastSet.x) > 0.0001f || Mathf.Abs(hcur.y - _heroLastSet.y) > 0.0001f)
-                    _heroBase = hcur;
-                Vector3 htarget = new Vector3(_heroBase.x * m, _heroBase.y * m, _heroBase.z);
-                if (Mathf.Abs(hcur.x - htarget.x) > 0.0001f || Mathf.Abs(hcur.y - htarget.y) > 0.0001f)
-                    t.localScale = htarget;
-                _heroLastSet = t.localScale;
+                UpdateHeroChildren(__instance);
             }
             catch (Exception e)
             {
@@ -1219,7 +1256,7 @@ namespace RangeMod
                     if (obj0 == null) return;
                     int kind0 = SpawnKind(obj0.name);
                     Func<float> live0 = MulForKind(kind0);
-                    if (live0 == null) return;
+                    if (live0 == null) { UntrackIfPresent(obj0.transform); return; }
                     if (!NearHero(obj0.transform)) return;
                     TrackSpell(obj0.transform, live0, kind0);
                     return;
@@ -1240,7 +1277,7 @@ namespace RangeMod
 
                 int kind = SpawnKind(n);
                 Func<float> live = MulForKind(kind);
-                if (live == null) return;
+                if (live == null) { UntrackIfPresent(obj.transform); return; }
 
                 Transform top = obj.transform;
 

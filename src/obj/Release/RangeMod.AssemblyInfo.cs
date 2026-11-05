@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("RangeMod")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5b997a943883768327a1daa21dc176b4dfa8819a")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+796b2b03951b29c566c8d3f8984722332a5f87c4")]
 [assembly: System.Reflection.AssemblyProductAttribute("RangeMod")]
 [assembly: System.Reflection.AssemblyTitleAttribute("RangeMod")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
