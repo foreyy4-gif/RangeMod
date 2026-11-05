@@ -31,7 +31,7 @@ namespace RangeMod
 
         public static bool MovementSync = false;
 
-        public override string GetVersion() => "3.11.0";
+        public override string GetVersion() => "3.12.0";
 
         public RangeMod() : base("Range Mod")
         {
@@ -72,8 +72,8 @@ namespace RangeMod
                     LogWarn($"[RM-DIAG] pool-spawn '{n}' nearHero={near}");
                 }
 
-                int kind;
-                Func<float> live = Patches.SpellMul(n, "", true, out kind);
+                int kind = Patches.SpawnKind(n);
+                Func<float> live = Patches.MulForKind(kind);
                 if (live == null) return obj;
 
                 if (!Patches.IsUnderHero(t) && !Patches.NearHero(t))
@@ -638,39 +638,26 @@ namespace RangeMod
                 || n.Contains("Hit");
         }
 
-        private static bool AbilityName(string n)
-        {
-            return n.Contains("SD ") || n.Contains("Sharp") || n.Contains("Crystal") || n.Contains("Dash")
-                || n.Contains("Recharge") || n.Contains("Wing") || n.Contains("Cloak") || n.Contains("Charm")
-                || n.Contains("Thorn") || n.Contains("Soul") || n.Contains("Geo") || n.Contains("Wall")
-                || n.Contains("Map") || n.Contains("Inv") || n.Contains("Focus") || n.Contains("Blobs")
-                || n.Contains("Blurp") || n.Contains("Grub");
-        }
-
         internal static Func<float> MulForKind(int kind)
         {
             if (kind == KindFire) return () => RangeMod.FireballMul;
             if (kind == KindQuake) return () => RangeMod.QuakeMul;
             if (kind == KindScream) return () => RangeMod.ScreamMul;
-            return () => 1f;
-        }
-
-        internal static int ActiveSpellKind;
-        private static float _activeSpellTime;
-
-        internal static Func<float> SpellMul(string n, string fsm, bool spawn, out int kind)
-        {
-            string nm = (n ?? "") + " " + (fsm ?? "");
-            int k = StrongKind(nm);
-            if (k >= 0) { kind = k; return MulForKind(k); }
-            if (spawn && GenericEffect(nm) && !AbilityName(nm) && Time.time - _activeSpellTime < 2.5f && ActiveSpellKind != KindNone)
-            {
-                kind = ActiveSpellKind;
-                return MulForKind(kind);
-            }
-            kind = KindNone;
             return null;
         }
+
+        internal static int SpawnKind(string n)
+        {
+            string nm = n ?? "";
+            if (nm.EndsWith("(Clone)")) nm = nm.Substring(0, nm.Length - 7);
+            if (nm == "Fireball" || nm == "Fireball2 Spiral" || nm == "Fireball2 Top") return KindFire;
+            if (nm == "Shadow Burst" || nm == "Shadow Burst Down" || nm == "Shadow Ring") return KindQuake;
+            if (nm == "Roar Wave Emitter Scream") return KindScream;
+            return KindNone;
+        }
+
+        private static int _lastCastKind;
+        private static bool _divingNow;
 
         internal static bool IsNailRelated(Transform t)
         {
@@ -740,32 +727,11 @@ namespace RangeMod
 
         private static int _trackDiag;
 
-        private static readonly string[] BodyIgnore =
-        {
-            "Slash", "Nail", "Attack", "Great", "Cyclone", "Audio", "Control", "Rigid",
-            "Inventory", "Charm", "Focus", "Map", "Body", "Sprite", "Shadow",
-            "UI", "Wing", "Cloak", "Horn", "Face", "Eye", "Hair", "Mesh", "Model", "Rig", "Knight", "Hero"
-        };
-
-        private static void CollectHeroEffects(Transform root, List<Transform> list)
-        {
-            for (int i = 0; i < root.childCount; i++)
-            {
-                Transform c = root.GetChild(i);
-                string n = c.name;
-                bool skip = false;
-                for (int k = 0; k < BodyIgnore.Length; k++)
-                    if (n.Contains(BodyIgnore[k])) { skip = true; break; }
-                if (skip) continue;
-                list.Add(c);
-                CollectHeroEffects(c, list);
-            }
-        }
-
         private static Transform _lastHeroRoot;
+        private static Transform _effRoot;
+        private static Transform[] _effectsChildren;
         private static Transform _spellsRoot;
         private static Transform[] _spellsChildren;
-        private static readonly List<Transform> _scanBuf = new List<Transform>(128);
         private static bool _heroUpdateLogged;
         private static Vector3 _heroBase = Vector3.one;
         private static Vector3 _heroLastSet = Vector3.one;
@@ -798,13 +764,10 @@ namespace RangeMod
                 : (st.StartsWith("Q") || st.Contains("Quake") || st.Contains("Dive")) ? KindQuake
                 : (st.Contains("Scream") || st.Contains("Roar") || st.Contains("Shriek") || st.Contains("Abyss") || st.Contains("Wraith")) ? KindScream
                 : KindNone;
-            if (castKind != KindNone)
-            {
-                if (ActiveSpellKind != castKind)
-                    RangeMod.Instance.LogWarn($"[RM-DIAG] cast state='{st}' kind={castKind}");
-                ActiveSpellKind = castKind;
-                _activeSpellTime = Time.time;
-            }
+            if (castKind != KindNone && _lastCastKind != castKind)
+                RangeMod.Instance.LogWarn($"[RM-DIAG] cast state='{st}' kind={castKind}");
+            _lastCastKind = castKind;
+            _divingNow = castKind == KindQuake;
 
             if (_spellsChildren == null || _spellsRoot == null || !_spellsRoot || _spellsRoot.parent != hero.transform)
             {
@@ -835,15 +798,33 @@ namespace RangeMod
                 }
             }
 
-            if (Time.frameCount % 4 == 0)
+            if (_effectsChildren == null || _effRoot == null || !_effRoot || _effRoot.parent != hero.transform)
             {
-                _scanBuf.Clear();
-                CollectHeroEffects(hero.transform, _scanBuf);
-                for (int i = 0; i < _scanBuf.Count; i++)
+                _effRoot = null;
+                _effectsChildren = null;
+                for (int si = 0; si < hero.transform.childCount; si++)
                 {
-                    int kind;
-                    Func<float> mv = SpellMul(_scanBuf[i].name, "", false, out kind);
-                    if (mv != null) TrackSpell(_scanBuf[i], mv, kind);
+                    Transform c0 = hero.transform.GetChild(si);
+                    if (c0.name == "Effects") { _effRoot = c0; break; }
+                }
+                if (_effRoot != null)
+                {
+                    _effectsChildren = new Transform[_effRoot.childCount];
+                    for (int si = 0; si < _effRoot.childCount; si++)
+                        _effectsChildren[si] = _effRoot.GetChild(si);
+                }
+            }
+            if (_effectsChildren != null)
+            {
+                for (int si = 0; si < _effectsChildren.Length; si++)
+                {
+                    Transform c0 = _effectsChildren[si];
+                    if (c0 == null) continue;
+                    string cn = c0.name;
+                    if (cn == "Roar Dust" || cn == "Roar Dust Lil")
+                        TrackSpell(c0, () => RangeMod.ScreamMul, KindScream);
+                    else if (cn == "Shadow Burst" || cn == "Shadow Burst Down" || cn == "Shadow Ring")
+                        TrackSpell(c0, () => _divingNow ? RangeMod.QuakeMul : RangeMod.HeroMul, KindQuake);
                 }
             }
 
@@ -1179,19 +1160,6 @@ namespace RangeMod
                 float scream = RangeMod.ScreamMul;
                 float quake = RangeMod.QuakeMul;
 
-                {
-                    string[] screamBoxes =
-                    {
-                        "S1 F 1", "S1 F 2", "S1 F 3",
-                        "S1 Flame1", "S1 Flame2", "S1 Flame3"
-                    };
-                    foreach (string nm in screamBoxes)
-                    {
-                        Transform t = FindDeep(__instance.transform, nm);
-                        if (t != null)
-                            TrackSpell(t, () => RangeMod.ScreamMul, KindScream);
-                    }
-                }
 
             }
             catch (Exception e)
@@ -1249,8 +1217,8 @@ namespace RangeMod
                 {
                     GameObject obj0 = __instance.storeObject.Value;
                     if (obj0 == null) return;
-                    int kind0;
-                    Func<float> live0 = SpellMul(obj0.name, fsm, true, out kind0);
+                    int kind0 = SpawnKind(obj0.name);
+                    Func<float> live0 = MulForKind(kind0);
                     if (live0 == null) return;
                     if (!NearHero(obj0.transform)) return;
                     TrackSpell(obj0.transform, live0, kind0);
@@ -1270,8 +1238,8 @@ namespace RangeMod
                 if (obj == null) return;
                 string n = obj.name;
 
-                int kind;
-                Func<float> live = SpellMul(n, fsm, true, out kind);
+                int kind = SpawnKind(n);
+                Func<float> live = MulForKind(kind);
                 if (live == null) return;
 
                 Transform top = obj.transform;
