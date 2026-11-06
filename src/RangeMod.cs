@@ -31,7 +31,7 @@ namespace RangeMod
 
         public static bool MovementSync = false;
 
-        public override string GetVersion() => "3.15.0";
+        public override string GetVersion() => "3.16.0";
 
         public RangeMod() : base("Range Mod")
         {
@@ -374,7 +374,12 @@ namespace RangeMod
     {
         private void LateUpdate()
         {
-            try { Patches.EnforceTrackedSpells(); }
+            try
+            {
+                var hero = HeroController.instance;
+                if (hero != null) Patches.EnforceHeroScale(hero);
+                Patches.EnforceTrackedSpells();
+            }
             catch (Exception e) { RangeMod.Instance.LogWarn("Enforce failed: " + e); }
         }
     }
@@ -623,11 +628,15 @@ namespace RangeMod
                 || n.Contains("Hit");
         }
 
+        private static readonly Func<float> _mulFire = () => RangeMod.FireballMul;
+        private static readonly Func<float> _mulQuake = () => RangeMod.QuakeMul;
+        private static readonly Func<float> _mulScream = () => RangeMod.ScreamMul;
+
         internal static Func<float> MulForKind(int kind)
         {
-            if (kind == KindFire) return () => RangeMod.FireballMul;
-            if (kind == KindQuake) return () => RangeMod.QuakeMul;
-            if (kind == KindScream) return () => RangeMod.ScreamMul;
+            if (kind == KindFire) return _mulFire;
+            if (kind == KindQuake) return _mulQuake;
+            if (kind == KindScream) return _mulScream;
             return null;
         }
 
@@ -812,7 +821,7 @@ namespace RangeMod
                     if (c0 == null) continue;
                     string cn = c0.name;
                     if (cn == "Roar Dust" || cn == "Roar Dust Lil")
-                        TrackSpell(c0, () => RangeMod.ScreamMul, KindScream);
+                        TrackSpell(c0, _mulScream, KindScream);
                 }
             }
 
@@ -844,6 +853,17 @@ namespace RangeMod
                     if (_diveCols[i] != null) _diveCols[i].size = _diveBases[i];
                 _diveScaled = false;
             }
+        }
+
+        internal static void EnforceHeroScale(HeroController hero)
+        {
+            float m = RangeMod.HeroMul;
+            Transform t = hero.transform;
+            float sign = t.localScale.x < 0f ? -1f : 1f;
+            Vector3 target = new Vector3(sign * m, m, 1f);
+            if (Mathf.Abs(t.localScale.x - target.x) > 0.0001f ||
+                Mathf.Abs(t.localScale.y - target.y) > 0.0001f)
+                t.localScale = target;
         }
 
         private static bool TryGetHeroChain(Transform t, out Vector3 chain)
@@ -1009,14 +1029,7 @@ namespace RangeMod
                 }
                 UpdateArtSlashes(__instance);
                 UpdateHeroSpells(__instance);
-                float m = RangeMod.HeroMul;
-                Transform t = __instance.transform;
-
-                float sign = t.localScale.x < 0f ? -1f : 1f;
-                Vector3 htarget = new Vector3(sign * m, m, 1f);
-                if (Mathf.Abs(t.localScale.x - htarget.x) > 0.0001f ||
-                    Mathf.Abs(t.localScale.y - htarget.y) > 0.0001f)
-                    t.localScale = htarget;
+                EnforceHeroScale(__instance);
             }
             catch (Exception e)
             {
