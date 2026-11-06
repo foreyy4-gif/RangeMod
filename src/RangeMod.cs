@@ -31,7 +31,7 @@ namespace RangeMod
 
         public static bool MovementSync = false;
 
-        public override string GetVersion() => "3.13.0";
+        public override string GetVersion() => "3.14.0";
 
         public RangeMod() : base("Range Mod")
         {
@@ -725,6 +725,8 @@ namespace RangeMod
         private static Transform _spellsRoot;
         private static Transform[] _spellsChildren;
         private static bool _heroUpdateLogged;
+        private static Vector3 _heroBase = Vector3.one;
+        private static Vector3 _heroLastSet = Vector3.one;
         private static PlayMakerFSM _spellFsm;
         private static BoxCollider2D[] _diveCols;
         private static Vector2[] _diveBases;
@@ -843,64 +845,6 @@ namespace RangeMod
                 for (int i = 0; i < _diveCols.Length; i++)
                     if (_diveCols[i] != null) _diveCols[i].size = _diveBases[i];
                 _diveScaled = false;
-            }
-        }
-
-        private struct HeroKid
-        {
-            public Transform t;
-            public Vector3 baseScale;
-            public Vector3 lastSet;
-            public Vector3 basePos;
-            public Vector3 lastSetPos;
-        }
-
-        private static readonly List<HeroKid> _heroKids = new List<HeroKid>();
-        private static Transform _kidsRoot;
-
-        internal static void UpdateHeroChildren(HeroController hero)
-        {
-            Transform h = hero.transform;
-            if (_kidsRoot != h || _heroKids.Count != h.childCount)
-            {
-                _kidsRoot = h;
-                _heroKids.Clear();
-                for (int i = 0; i < h.childCount; i++)
-                {
-                    Transform c = h.GetChild(i);
-                    _heroKids.Add(new HeroKid
-                    {
-                        t = c,
-                        baseScale = c.localScale,
-                        lastSet = c.localScale,
-                        basePos = c.localPosition,
-                        lastSetPos = c.localPosition
-                    });
-                }
-            }
-            float m = RangeMod.HeroMul;
-            for (int i = 0; i < _heroKids.Count; i++)
-            {
-                HeroKid k = _heroKids[i];
-                if (k.t == null) continue;
-
-                Vector3 cur = k.t.localScale;
-                if (Math.Abs(cur.x - k.lastSet.x) > 0.0001f || Math.Abs(cur.y - k.lastSet.y) > 0.0001f)
-                    k.baseScale = cur;
-                Vector3 tgt = new Vector3(k.baseScale.x * m, k.baseScale.y * m, k.baseScale.z);
-                if (Math.Abs(cur.x - tgt.x) > 0.0001f || Math.Abs(cur.y - tgt.y) > 0.0001f)
-                    k.t.localScale = tgt;
-                k.lastSet = k.t.localScale;
-
-                Vector3 lp = k.t.localPosition;
-                if (Math.Abs(lp.x - k.lastSetPos.x) > 0.0001f || Math.Abs(lp.y - k.lastSetPos.y) > 0.0001f)
-                    k.basePos = lp;
-                Vector3 tp = new Vector3(k.basePos.x * m, k.basePos.y * m, lp.z);
-                if (Math.Abs(lp.x - tp.x) > 0.0001f || Math.Abs(lp.y - tp.y) > 0.0001f)
-                    k.t.localPosition = tp;
-                k.lastSetPos = k.t.localPosition;
-
-                _heroKids[i] = k;
             }
         }
 
@@ -1067,7 +1011,16 @@ namespace RangeMod
                 }
                 UpdateArtSlashes(__instance);
                 UpdateHeroSpells(__instance);
-                UpdateHeroChildren(__instance);
+                float m = RangeMod.HeroMul;
+                Transform t = __instance.transform;
+
+                Vector3 hcur = t.localScale;
+                if (Mathf.Abs(hcur.x - _heroLastSet.x) > 0.0001f || Mathf.Abs(hcur.y - _heroLastSet.y) > 0.0001f)
+                    _heroBase = hcur;
+                Vector3 htarget = new Vector3(_heroBase.x * m, _heroBase.y * m, _heroBase.z);
+                if (Mathf.Abs(hcur.x - htarget.x) > 0.0001f || Mathf.Abs(hcur.y - htarget.y) > 0.0001f)
+                    t.localScale = htarget;
+                _heroLastSet = t.localScale;
             }
             catch (Exception e)
             {
