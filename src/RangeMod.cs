@@ -31,7 +31,7 @@ namespace RangeMod
 
         public static bool MovementSync = false;
 
-        public override string GetVersion() => "3.14.0";
+        public override string GetVersion() => "3.15.0";
 
         public RangeMod() : base("Range Mod")
         {
@@ -725,8 +725,6 @@ namespace RangeMod
         private static Transform _spellsRoot;
         private static Transform[] _spellsChildren;
         private static bool _heroUpdateLogged;
-        private static Vector3 _heroBase = Vector3.one;
-        private static Vector3 _heroLastSet = Vector3.one;
         private static PlayMakerFSM _spellFsm;
         private static BoxCollider2D[] _diveCols;
         private static Vector2[] _diveBases;
@@ -1014,13 +1012,11 @@ namespace RangeMod
                 float m = RangeMod.HeroMul;
                 Transform t = __instance.transform;
 
-                Vector3 hcur = t.localScale;
-                if (Mathf.Abs(hcur.x - _heroLastSet.x) > 0.0001f || Mathf.Abs(hcur.y - _heroLastSet.y) > 0.0001f)
-                    _heroBase = hcur;
-                Vector3 htarget = new Vector3(_heroBase.x * m, _heroBase.y * m, _heroBase.z);
-                if (Mathf.Abs(hcur.x - htarget.x) > 0.0001f || Mathf.Abs(hcur.y - htarget.y) > 0.0001f)
+                float sign = t.localScale.x < 0f ? -1f : 1f;
+                Vector3 htarget = new Vector3(sign * m, m, 1f);
+                if (Mathf.Abs(t.localScale.x - htarget.x) > 0.0001f ||
+                    Mathf.Abs(t.localScale.y - htarget.y) > 0.0001f)
                     t.localScale = htarget;
-                _heroLastSet = t.localScale;
             }
             catch (Exception e)
             {
