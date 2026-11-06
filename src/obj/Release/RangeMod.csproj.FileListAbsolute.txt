@@ -1,7 +1,0 @@
-/tmp/opencode/RangeMod/src/bin/Release/RangeMod.dll
-/tmp/opencode/RangeMod/src/obj/Release/RangeMod.csproj.AssemblyReference.cache
-/tmp/opencode/RangeMod/src/obj/Release/RangeMod.GeneratedMSBuildEditorConfig.editorconfig
-/tmp/opencode/RangeMod/src/obj/Release/RangeMod.AssemblyInfoInputs.cache
-/tmp/opencode/RangeMod/src/obj/Release/RangeMod.AssemblyInfo.cs
-/tmp/opencode/RangeMod/src/obj/Release/RangeMod.csproj.CoreCompileInputs.cache
-/tmp/opencode/RangeMod/src/obj/Release/RangeMod.dll
