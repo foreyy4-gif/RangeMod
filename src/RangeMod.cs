@@ -31,7 +31,7 @@ namespace RangeMod
 
         public static bool MovementSync = false;
 
-        public override string GetVersion() => "3.16.0";
+        public override string GetVersion() => "3.17.0";
 
         public RangeMod() : base("Range Mod")
         {
@@ -855,9 +855,12 @@ namespace RangeMod
             }
         }
 
+        private static bool Bad(float v) => float.IsNaN(v) || float.IsInfinity(v);
+
         internal static void EnforceHeroScale(HeroController hero)
         {
             float m = RangeMod.HeroMul;
+            if (Bad(m) || m > 10f) return;
             Transform t = hero.transform;
             float sign = t.localScale.x < 0f ? -1f : 1f;
             Vector3 target = new Vector3(sign * m, m, 1f);
@@ -890,16 +893,23 @@ namespace RangeMod
                 if (TrackedAncestor(tr.t, tr.kind)) continue;
 
                 float m = tr.mul != null ? tr.mul() : 1f;
+                if (Bad(m)) continue;
                 Vector3 cur = tr.t.localScale;
+                if (Bad(cur.x) || Bad(cur.y) || Bad(cur.z)) continue;
                 if (Math.Abs(cur.x - tr.lastSet.x) > 0.0001f || Math.Abs(cur.y - tr.lastSet.y) > 0.0001f)
-                    tr.baseScale = cur;
+                {
+                    if (Math.Abs(cur.x) < 1000f && Math.Abs(cur.y) < 1000f)
+                        tr.baseScale = cur;
+                }
 
                 Vector3 lossy = tr.t.lossyScale;
                 Vector3 target = cur;
-                if (Math.Abs(cur.x) > 1e-5f && Math.Abs(lossy.x) > 1e-5f)
+                if (Math.Abs(cur.x) > 1e-5f && Math.Abs(lossy.x) > 0.05f)
                     target.x = tr.baseScale.x * m * cur.x / lossy.x;
-                if (Math.Abs(cur.y) > 1e-5f && Math.Abs(lossy.y) > 1e-5f)
+                if (Math.Abs(cur.y) > 1e-5f && Math.Abs(lossy.y) > 0.05f)
                     target.y = tr.baseScale.y * m * cur.y / lossy.y;
+                if (Bad(target.x) || Bad(target.y) || Math.Abs(target.x) > 100f || Math.Abs(target.y) > 100f)
+                    continue;
 
                 if (Math.Abs(target.x - cur.x) > 0.0001f || Math.Abs(target.y - cur.y) > 0.0001f)
                     tr.t.localScale = target;
@@ -915,14 +925,16 @@ namespace RangeMod
                 if (tr.underHero)
                 {
                     Vector3 lp = tr.t.localPosition;
+                    if (Bad(lp.x) || Bad(lp.y)) continue;
                     if (Math.Abs(lp.x - tr.lastSetPos.x) > 0.0001f || Math.Abs(lp.y - tr.lastSetPos.y) > 0.0001f)
                         tr.basePos = lp;
                     float hm = tr.t.parent != null ? Mathf.Abs(tr.t.parent.lossyScale.y) : 1f;
-                    if (hm < 1e-4f) hm = 1f;
+                    if (hm < 0.05f) continue;
                     Vector3 tp;
                     tp.x = (tr.chain.x + tr.basePos.x) * m / hm - tr.chain.x;
                     tp.y = (tr.chain.y + tr.basePos.y) * m / hm - tr.chain.y;
                     tp.z = (tr.chain.z + tr.basePos.z) * m / hm - tr.chain.z;
+                    if (Bad(tp.x) || Bad(tp.y) || Math.Abs(tp.x) > 1000f || Math.Abs(tp.y) > 1000f) continue;
                     if (Math.Abs(tp.x - lp.x) > 0.0001f || Math.Abs(tp.y - lp.y) > 0.0001f)
                         tr.t.localPosition = tp;
                     tr.lastSetPos = tp;
