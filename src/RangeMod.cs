@@ -31,12 +31,14 @@ namespace RangeMod
 
         public static bool MovementSync = false;
 
-        public override string GetVersion() => "3.17.0";
+        public override string GetVersion() => "3.18.0";
 
         public RangeMod() : base("Range Mod")
         {
             Instance = this;
         }
+
+        private MenuScreen _cachedScreen;
 
         public override void Initialize(Dictionary<string, Dictionary<string, GameObject>> preloadedObjects)
         {
@@ -128,6 +130,7 @@ namespace RangeMod
         public MenuScreen GetMenuScreen(MenuScreen modListMenu, ModToggleDelegates? toggleDelegates)
         {
             InstanceMenu.returnScreen = modListMenu;
+            if (_cachedScreen != null) return _cachedScreen;
             RangeMod.Instance.Log("[RM-DIAG] GetMenuScreen called, building slider rows");
 
             MenuButton backButton;
@@ -234,7 +237,8 @@ namespace RangeMod
                 }
             );
 
-            return builder.Build();
+            _cachedScreen = builder.Build();
+            return _cachedScreen;
         }
 
         private static void AddSlider(ContentArea c, string label, Func<float> get, Action<float> set)
@@ -933,7 +937,7 @@ namespace RangeMod
                     Vector3 tp;
                     tp.x = (tr.chain.x + tr.basePos.x) * m / hm - tr.chain.x;
                     tp.y = (tr.chain.y + tr.basePos.y) * m / hm - tr.chain.y;
-                    tp.z = (tr.chain.z + tr.basePos.z) * m / hm - tr.chain.z;
+                    tp.z = lp.z;
                     if (Bad(tp.x) || Bad(tp.y) || Math.Abs(tp.x) > 1000f || Math.Abs(tp.y) > 1000f) continue;
                     if (Math.Abs(tp.x - lp.x) > 0.0001f || Math.Abs(tp.y - lp.y) > 0.0001f)
                         tr.t.localPosition = tp;
